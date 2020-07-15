@@ -1,0 +1,75 @@
+query ($after: String, $first: Int, $conditions: String="is:public sort:created") {
+    search(query: $conditions, type: REPOSITORY, first: $first, after: $after) {
+        edges {
+            node {
+                ... on Repository {
+                    name
+                    id
+                    description
+                    forkCount
+                    isFork
+                    isArchived
+                    isLocked
+                    createdAt
+                    pushedAt
+
+                    primaryLanguage {
+                        name
+                    }
+
+                    assignableUsers {
+                        totalCount
+                    }
+
+                    stargazers {
+                        totalCount
+                    }
+
+                    watchers {
+                        totalCount
+                    }
+
+                    issues {
+                        totalCount
+                    }
+
+                    pullRequests {
+                        totalCount
+                    }
+
+                    repositoryTopics(first: 5) {
+                        edges {
+                            node {
+                                topic {
+                                    name
+                                }
+                            }
+                        }
+                    }
+
+                    licenseInfo {
+                        key
+                    }
+
+                    commits: object(expression: "master") {
+                        ... on Commit {
+                            history {
+                                totalCount
+                            }
+                        }
+                    }
+
+                    readme: object(expression: "master:README.md") {
+                        ... on Blob {
+                            text
+                        }
+                    }
+                }
+            }
+        }
+        pageInfo {
+            hasNextPage
+            endCursor
+        }
+    }
+}
