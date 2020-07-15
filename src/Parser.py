@@ -2,14 +2,17 @@ import json
 import pandas as pd
 
 class Parser():
-    data = pd.DataFrame(columns=["Name", "ID", "Description", "ForkCount", "IsFork", "Archived", "Locked", "CreatedDate", "LastPushedDate", "PrimaryLanguage", "Users", "Stars", "Watchs", "Issues", "PullRequests", "Labels", "Topics", "License", "Commits", "README"])
+    data = pd.DataFrame(columns=["Name", "ID", "Description", "ForkCount", "Fork", "Archived", "Locked", "CreatedDate", "LastPushedDate", "PrimaryLanguage", "Users", "Stars", "Watchs", "Issues", "PullRequests", "Labels", "Topics", "License", "Commits", "README"])
 
     def __init__(self, data=None):
+        self.data = self.fix_dtypes(self.data)
+
         if type(data) == pd.DataFrame:
             self.data = self.data.append(data, ignore_index=True)
         elif data != None:
             for repo in data:
-                self.data = self.data.append(self.remap_json(repo["node"]), ignore_index=True)
+                temp = pd.DataFrame(columns=self.data.columns).append(self.remap_json(repo["node"]), ignore_index=True)
+                self.data = self.data.append(self.fix_dtypes(temp), ignore_index=True)
 
     # Avoid TypeErrors due to None types within nested dictionaries
     def safe_parse_list(self, json, keys: list):
@@ -58,11 +61,29 @@ class Parser():
 
         return values
 
+    def fix_dtypes(self, data):
+        data["ForkCount"] = pd.to_numeric(data["ForkCount"])
+        data["Users"] = pd.to_numeric(data["Users"])
+        data["Stars"] = pd.to_numeric(data["Stars"])
+        data["Watchs"] = pd.to_numeric(data["Watchs"])
+        data["Issues"] = pd.to_numeric(data["Issues"])
+        data["PullRequests"] = pd.to_numeric(data["PullRequests"])
+        data["Commits"] = pd.to_numeric(data["Commits"])
+
+        data["Fork"].fillna(False, inplace=True)
+        data["Archived"].fillna(False, inplace=True)
+        data["Locked"].fillna(False, inplace=True)
+
+        data["Fork"] = data["Fork"].astype("category")
+        data["Archived"] = data["Archived"].astype("category")
+        data["Locked"] = data["Locked"].astype("category")
+
+        data["CreatedDate"] = pd.to_datetime(data["CreatedDate"])
+        data["LastPushedDate"] = pd.to_datetime(data["LastPushedDate"])
+
+        return data
+
     # Appends new raw or pre-formatted data
     def append(self, new_data):
-        if type(new_data) == pd.DataFrame:
-            self.data = self.data.append(new_data, ignore_index=True)
-        else:
-            self.__init__(new_data)
-
+        self.__init__(new_data)
         self.data.drop_duplicates(subset=["ID"], inplace=True)
