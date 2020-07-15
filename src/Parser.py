@@ -4,11 +4,12 @@ import pandas as pd
 class Parser():
     data = pd.DataFrame(columns=["Name", "ID", "Description", "ForkCount", "IsFork", "Archived", "Locked", "CreatedDate", "LastPushedDate", "PrimaryLanguage", "Users", "Stars", "Watchs", "Issues", "PullRequests", "Labels", "Topics", "License", "Commits", "README"])
 
-    def __init__(self, json):
-        self.raw_data = json
-
-        for repo in self.raw_data:
-            self.data = self.data.append(self.remap_json(repo["node"]), ignore_index=True)
+    def __init__(self, data=None):
+        if type(data) == pd.DataFrame:
+            self.data = self.data.append(data, ignore_index=True)
+        elif data != None:
+            for repo in data:
+                self.data = self.data.append(self.remap_json(repo["node"]), ignore_index=True)
 
     # Avoid TypeErrors due to None types within nested dictionaries
     def safe_parse_list(self, json, keys: list):
