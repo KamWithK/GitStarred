@@ -26,7 +26,7 @@ class GraphQL():
 
     # Makes a single query
     # View "Data/Temp.json" for raw data
-    def try_query(self):
+    def basic_query(self):
         # Continuously retry request until successful
         while True:
             raw_data = requests.post(url="https://api.github.com/graphql", json=self.query, headers=self.headers).text
@@ -35,15 +35,22 @@ class GraphQL():
             if not "errors" in parsed_data: break
 
         try:
-            self.update_params({"after": parsed_data["data"]["search"]["pageInfo"]["endCursor"]}, True)
-            self.update_params({"next_page": parsed_data["data"]["search"]["pageInfo"]["hasNextPage"]})
-
-            return parsed_data["data"]["search"]["edges"]
+            return parsed_data["data"]
         except TypeError as error:
             print(json.loads(raw_data))
             print(error)
 
+    # Makes a single query keeping state
+    # Needs to have the `after` and `next_page` parameters in the expected location (within `search`, `pageInfo`)
+    def try_meta_query(self):
+        data = self.basic_query()["search"]
+
+        self.update_params({"after": data["pageInfo"]["endCursor"]}, True)
+        self.update_params({"next_page": data["pageInfo"]["hasNextPage"]})
+
+        return data["edges"]
+
     # Generator for handling pagination
     def get_stream(self):
         while self.config["next_page"] == True:
-            yield self.try_query()
+            yield self.try_meta_query()
