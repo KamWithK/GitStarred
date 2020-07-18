@@ -1,5 +1,7 @@
 import requests
 import json
+import re
+
 import pandas as pd
 
 from pandas.io.json import json_normalize
@@ -31,8 +33,9 @@ class GraphQL():
         while True:
             raw_data = requests.post(url="https://api.github.com/graphql", json=self.query, headers=self.headers).text
             parsed_data = json.loads(raw_data)
-            json.dump(parsed_data, open("Data/Temp.json", "w"), indent=2)
+            json.dump(parsed_data, open("Data/TempData.json", "w"), indent=2)
             if not "errors" in parsed_data: break
+            else: open("Data/TempQuery.graphql", "w").write(self.query["query"])
 
         try:
             return parsed_data["data"]
@@ -49,6 +52,21 @@ class GraphQL():
         self.update_params({"next_page": data["pageInfo"]["hasNextPage"]})
 
         return data["edges"]
+
+    # Runs a single query composed of a number of subsections
+    def batch_query(self, outer_query, inner_queries: dict):
+        inner_groups = [inner_queries[i:i + 300] for i in range(0, len(inner_queries), 300)]
+        outputs = {}
+
+        for query_group in inner_groups:
+            inner_query = "\n".join(["{", *query_group, "}"])
+
+            self.query["query"] = re.sub("{.*}", inner_query, outer_query)
+            outputs.update(self.basic_query())
+        
+        if len(outputs) != len(inner_queries): print("FAIL")
+        
+        return outputs
 
     # Generator for handling pagination
     def get_stream(self):
