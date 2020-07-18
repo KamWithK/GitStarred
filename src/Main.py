@@ -15,7 +15,7 @@ if os.path.exists("Data/Periods.pickle"):
 else:
     breakdown = DateBreakdown("Data/Config.json")
     periods = breakdown.safe_expand_periods(pd.period_range("2006", pd.to_datetime("now"), freq="525600 T"))
-    
+
     for period in periods:
         print(period)
 
@@ -29,10 +29,12 @@ parser = Parser(pd.read_pickle("Data/Data.pickle")) if os.path.exists("Data/Data
 # query.update_params({"first": 100, "after": None, "conditions": "is:public sort:created"}, True)
 # query.update_params({"next_page": True})
 
-results = query.get_stream()
+results = query.collect_between(periods[0])
 
-for json_data in results:
-    parser.append(json_data)
+for period in results:
+    temp_data = []
+    [temp_data.extend(temp_json) for temp_json in period]
+    parser.append(temp_data)
 
     print(f"{len(parser.data)} now downloaded")
     parser.data.to_pickle("Data/Data.pickle")

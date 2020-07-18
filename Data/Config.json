@@ -1,6 +1,7 @@
 {
   "token": "",
   "next_page": true,
+  "current_period": null,
   "variables": {
     "first": 100,
     "after": null,

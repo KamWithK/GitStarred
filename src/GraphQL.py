@@ -5,6 +5,7 @@ import re
 import pandas as pd
 
 from pandas.io.json import json_normalize
+from hashlib import sha256
 
 class GraphQL():
     def __init__(self, query, config_path):
@@ -31,11 +32,14 @@ class GraphQL():
     def basic_query(self):
         # Continuously retry request until successful
         while True:
-            raw_data = requests.post(url="https://api.github.com/graphql", json=self.query, headers=self.headers).text
-            parsed_data = json.loads(raw_data)
-            json.dump(parsed_data, open("Data/TempData.json", "w"), indent=2)
-            if not "errors" in parsed_data: break
-            else: open("Data/TempQuery.graphql", "w").write(self.query["query"])
+            try:
+                raw_data = requests.post(url="https://api.github.com/graphql", json=self.query, headers=self.headers).text
+                parsed_data = json.loads(raw_data)
+                json.dump(parsed_data, open("Data/TempData.json", "w"), indent=2)
+                if not "errors" in parsed_data: break
+                else: open("Data/TempQuery.graphql", "w").write(self.query["query"])
+            except Exception as identifier:
+                print(identifier)
 
         try:
             return parsed_data["data"]
@@ -72,3 +76,22 @@ class GraphQL():
     def get_stream(self):
         while self.config["next_page"] == True:
             yield self.try_meta_query()
+
+    def collect_between(self, periods):
+        continue_from_here = True if self.config["current_period"] == None else False
+        date_format = lambda date : date.strftime("%Y-%m-%dT%H:%M:%d")
+        id_hash = lambda period : f"h{sha256(date_format(period).encode()).hexdigest()}"
+
+        for period in periods:
+            current_id = id_hash(period)
+
+            if self.config["current_period"] == current_id:
+                continue_from_here = True
+            if continue_from_here==True:
+                self.update_params({"conditions": f"is:public sort:created created:{date_format(period.start_time)}..{date_format(period.end_time)}"}, True)
+                self.update_params({"current_period": current_id})
+
+                yield self.get_stream()
+
+            self.update_params({"after": None}, True)
+            self.update_params({"next_page": True})
