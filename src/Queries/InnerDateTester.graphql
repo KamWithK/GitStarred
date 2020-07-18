@@ -1,0 +1,3 @@
+{id}: search(query: "is:public sort:created {argument}", type: REPOSITORY) {{
+    repositoryCount
+}}

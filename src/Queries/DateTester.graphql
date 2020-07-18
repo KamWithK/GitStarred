@@ -1,0 +1,5 @@
+query ($conditions: String="is:public sort:created") {
+    search(query: $conditions, type: REPOSITORY) {
+        repositoryCount
+    }
+}
