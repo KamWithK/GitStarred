@@ -1,10 +1,4 @@
 {
-  "token": "",
-  "next_page": true,
-  "current_period": null,
-  "variables": {
-    "first": 100,
-    "after": null,
-    "conditions": "is:public sort:created"
-  }
+  "token": "TOKEN",
+  "first": 100
 }

@@ -5,36 +5,35 @@ import json
 
 import pandas as pd
 
-from GraphQL import GraphQL
-from Parser import Parser
-from DateBreakdown import DateBreakdown
+from DataCollection.GraphQL import GraphQL
+from DataCollection.Parser import Parser
+from DataCollection.DateBreakdown import DateBreakdown
+
+breakdown = DateBreakdown("Data/Config.json", "Data/History.json")
 
 # Finds the needed date divisions to use
 if os.path.exists("Data/Periods.pickle"):
     periods = pd.read_pickle("Data/Periods.pickle")
 else:
-    breakdown = DateBreakdown("Data/Config.json")
     periods = breakdown.safe_expand_periods(pd.period_range("2006", pd.to_datetime("now"), freq="525600 T"))
 
     for period in periods:
         print(period)
 
-# Actual data collection
-query = {"query": open("src/Queries/Collection.graphql").read()}
-query = GraphQL(query, "Data/Config.json")
-
+# Data collection
+# Setup variables
+query = open("src/Queries/Collection.graphql").read()
+config = json.load(open("Data/Config.json"))
+history = json.load(open("Data/History.json")) if os.path.exists("Data/History.json") else {}
 parser = Parser(pd.read_pickle("Data/Data.pickle")) if os.path.exists("Data/Data.pickle") else Parser()
 
-# Code to reset values to their original state
-# query.update_params({"first": 100, "after": None, "conditions": "is:public sort:created"}, True)
-# query.update_params({"next_page": True})
+# Loop through data as it is collected
+variables = lambda history, config : {"after": history.get("after"), "first": config["first"]}
+results = breakdown.collect_between(periods[0], query, variables, history)
 
-results = query.collect_between(periods[0])
-
-for period in results:
-    temp_data = []
-    [temp_data.extend(temp_json) for temp_json in period]
-    parser.append(temp_data)
+for output, history in results:
+    parser.append(output)
+    json.dump(history, open("Data/History.json", "w"), indent=2)
 
     print(f"{len(parser.data)} now downloaded")
     parser.data.to_pickle("Data/Data.pickle")

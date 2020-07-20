@@ -2,13 +2,18 @@ import pandas as pd
 import requests
 import json
 
-from GraphQL import GraphQL
+from DataCollection.GraphQL import GraphQL
+from collections import ChainMap
 from hashlib import sha256
 
 class DateBreakdown():
-    def __init__(self, config_path):
-        query = open("src/Queries/DateTester.graphql").read()
-        self.query = GraphQL({"query": query}, config_path)
+    def __init__(self, config_path, history_path):
+        self.config = json.load(open(config_path))
+
+        self.config_path = config_path
+        self.history_path = history_path
+
+        self.query = GraphQL(self.config["token"])
 
         # Subquery to use when batching
         self.search = open("src/Queries/InnerDateTester.graphql").read()
@@ -64,3 +69,30 @@ class DateBreakdown():
                 safe_periods.append(pd.Period(period.start_time, pd.to_datetime("now") - period.start_time))
 
         return self.expand_periods(safe_periods)
+
+    def collect_period(self, period, query: str, variables={}):
+        date_format = lambda date : date.strftime("%Y-%m-%dT%H:%M:%d")
+        start, end = date_format(period.start_time), date_format(period.end_time)
+        variables["conditions"] = f"is:public sort:created created:{start}..{end}"
+
+        return self.query.get_stream(query, variables)
+
+    # Collects data between a list of periods
+    def collect_between(self, periods, query: str, select_variables, history: dict):
+        date_format = lambda date : date.strftime("%Y-%m-%dT%H:%M:%d")
+        id_hash = lambda period : f"h{sha256(date_format(period).encode()).hexdigest()}"
+
+        for period in periods:
+            current_id = id_hash(period)
+
+            # Collect data on new and partially existing periods
+            history[current_id] = history.get(current_id, {})
+            history[current_id]["next_page"] = history[current_id].get("next_page", True)
+
+            if history[current_id]["next_page"] == True:
+                variables = select_variables(history[current_id], self.config)
+
+                for output, new_history in self.collect_period(period, query, variables):
+                    history.update({current_id: new_history})
+
+                    yield output, history
