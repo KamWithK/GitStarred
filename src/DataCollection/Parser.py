@@ -87,3 +87,5 @@ class Parser():
     def append(self, new_data):
         self.__init__(new_data)
         self.data.drop_duplicates(subset=["ID"], inplace=True)
+        self.data.to_pickle("Data/Data.pickle")
+        print(f"\r{len(self.data)} now downloaded", end="", flush=True)

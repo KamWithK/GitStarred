@@ -1,68 +1,72 @@
-import requests
+import asyncio, aiohttp
 import json
 import re
 
 import pandas as pd
 
-from DataCollection.ConfigManager import ConfigManager
+from aiohttp import ClientSession
+from aiohttp_socks import ProxyConnector
+from tenacity import retry
+from tenacity import wait_full_jitter
+from collections import ChainMap
 from hashlib import sha256
 
 class GraphQL():
     def __init__(self, token: str):
-        self.config_manager = ConfigManager()
-
-        self.headers = {'Authorization': f"token {token}"}
+        self.headers = {"Authorization": f"token {token}"}
+        self.session = None
 
     # Makes a single query
     # View "Data/Temp.json" for raw data
-    def basic_query(self, query: str, variables=None):
+    @retry(wait=wait_full_jitter())
+    async def basic_query(self, query: str, variables=None):
         json_query = {"query": query, "variables": variables}
 
-        # Continuously retry request until successful
-        while True:
-            try:
-                raw_data = requests.post(url="https://api.github.com/graphql", json=json_query, headers=self.headers).text
-                parsed_data = json.loads(raw_data)
-                json.dump(parsed_data, open("Data/TempData.json", "w"), indent=2)
-                if not "errors" in parsed_data: break
-                else: open("Data/TempQuery.graphql", "w").write(query)
-            except Exception as identifier:
-                print(identifier)
+        if self.session == None: self.session = ClientSession(headers=self.headers)
+
+        async with self.session.post("https://api.github.com/graphql", json=json_query) as response:
+            parsed_data = await response.json()
+
+        json.dump(parsed_data, open("Data/TempData.json", "w"), indent=2)
+
+        # Trigger retrying the query when an error is found
+        if "errors" in parsed_data: raise ValueError
 
         try:
             return parsed_data["data"]
         except TypeError as error:
-            print(json.loads(raw_data))
             print(error)
 
     # Makes a single query keeping state
     # Needs to have the `after` and `next_page` parameters in the expected location (within `search`, `pageInfo`)
-    def try_meta_query(self, query: str, variables={}):
-        data = self.basic_query(query, variables)["search"]
+    async def try_meta_query(self, query: str, variables={}):
+        data = await self.basic_query(query, variables)
+        data = data["search"]
 
         return data["edges"], {"after": data["pageInfo"]["endCursor"], "next_page": data["pageInfo"]["hasNextPage"]}
 
     # Runs a single query composed of a number of subsections
-    def batch_query(self, outer_query: str, inner_queries: dict, variables: dict={}):
+    async def batch_query(self, outer_query: str, inner_queries: dict, variables: dict={}):
         inner_groups = [inner_queries[i:i + 300] for i in range(0, len(inner_queries), 300)]
         outputs = {}
 
-        for query_group in inner_groups:
+        async def single_batch_query(query_group):
             inner_query = "\n".join(["{", *query_group, "}"])
 
             query = re.sub("{.*}", inner_query, outer_query)
-            outputs.update(self.basic_query(query, variables))
-        
-        return outputs
+            return await self.basic_query(query, variables)
+
+        outputs = await asyncio.gather(*[single_batch_query(query_group) for query_group in inner_groups])
+        return dict(ChainMap(*outputs))
 
     # Generator for handling pagination
-    def get_stream(self, query: str, variables: dict={}):
+    async def get_stream(self, query: str, variables: dict={}):
         new_history = {"next_page": True}
         query_variables = variables
 
         while new_history["next_page"] == True:
             query_variables["after"] = new_history.get("after")
-            output, metadata = self.try_meta_query(query, query_variables)
-            new_history = self.config_manager.update(metadata, new_history)
+            output, metadata = await self.try_meta_query(query, query_variables)
+            new_history.update(metadata)
 
             yield output, new_history
