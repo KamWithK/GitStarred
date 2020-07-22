@@ -1,4 +1,8 @@
 {
-  "token": "TOKEN",
+  "tokens": [
+    "TOKEN 1",
+    "TOKEN 2",
+    "TOKEN 3"
+  ],
   "first": 100
 }

@@ -8,12 +8,14 @@ from aiohttp import ClientSession
 from aiohttp_socks import ProxyConnector
 from tenacity import retry
 from tenacity import wait_full_jitter
+from itertools import cycle
 from collections import ChainMap
 from hashlib import sha256
 
 class GraphQL():
-    def __init__(self, token: str):
-        self.headers = {"Authorization": f"token {token}"}
+    def __init__(self, tokens: list):
+        self.tokens = cycle(tokens)
+        self.next_header = lambda : {"Authorization": f"token {next(self.tokens)}"}
         self.session = None
 
     # Makes a single query
@@ -22,9 +24,9 @@ class GraphQL():
     async def basic_query(self, query: str, variables=None):
         json_query = {"query": query, "variables": variables}
 
-        if self.session == None: self.session = ClientSession(headers=self.headers)
+        if self.session == None: self.session = ClientSession()
 
-        async with self.session.post("https://api.github.com/graphql", json=json_query) as response:
+        async with self.session.post("https://api.github.com/graphql", headers=self.next_header(), json=json_query) as response:
             parsed_data = await response.json()
 
         json.dump(parsed_data, open("Data/TempData.json", "w"), indent=2)
