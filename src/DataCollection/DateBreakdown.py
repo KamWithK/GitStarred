@@ -5,15 +5,16 @@ import json
 import pandas as pd
 
 from DataCollection.GraphQL import GraphQL
+from databases import Database
 from collections import ChainMap
 from hashlib import sha256
 
 class DateBreakdown():
-    def __init__(self, config_path, history_path):
+    def __init__(self, config_path, database):
         self.config = json.load(open(config_path))
+        self.database = database
 
         self.config_path = config_path
-        self.history_path = history_path
 
         self.query = GraphQL(self.config["tokens"])
 
@@ -73,32 +74,27 @@ class DateBreakdown():
 
         return await self.expand_periods(safe_periods)
 
-    async def collect_period(self, period, query: str, select_variables, history: dict, parser):
+    async def collect_period(self, period, query: str, select_variables, parser):
         date_format = lambda date : date.strftime("%Y-%m-%dT%H:%M:%d")
         current_id = f"h{sha256(date_format(period).encode()).hexdigest()}"
         start, end = date_format(period.start_time), date_format(period.end_time)
 
         # Collect data on new and partially existing periods
-        history[current_id] = history.get(current_id, {})
-        history[current_id]["next_page"] = history[current_id].get("next_page", True)
+        next_page = await self.database.fetch_one("SELECT DISTINCT NextPage FROM History WHERE ID=:ID", {"ID": current_id})
+        after = await self.database.fetch_one("SELECT DISTINCT After FROM History WHERE ID=:ID", {"ID": current_id})
 
-        if history[current_id]["next_page"] == True:
-            variables = select_variables(history[current_id], self.config)
+        if next_page == True or next_page == None:
+            variables = select_variables({"next_page": next_page, "after": after}, self.config)
             variables["conditions"] = f"is:public sort:created created:{start}..{end}"
 
             async for output, new_history in self.query.get_stream(query, variables):
-                history.update({current_id: new_history})
-
-                json.dump(history, open(self.history_path, "w"), indent=2)
-                parser.append(output)
-            
-            return history
+                replace_query = "REPLACE INTO History(ID, NextPage, After) VALUES (:ID, :NextPage, :After)"
+                values = {"ID": current_id, "NextPage": new_history["next_page"], "After": new_history["after"]}
+                await self.database.execute(replace_query, values)
+                await asyncio.get_running_loop().run_in_executor(None, lambda : parser.append(output))
 
     # Collects data between a list of periods
-    async def collect_between(self, periods, query: str, select_variables, history: dict, parser):
-        histories = await asyncio.gather(*[self.collect_period(period, query, select_variables, history, parser) for period in periods])
+    async def collect_between(self, periods, query: str, select_variables, parser):
+        await asyncio.gather(*[self.collect_period(period, query, select_variables, parser) for period in periods])
         
         if self.query.session != None: await self.query.session.close()
-
-        if all(histories) != False:
-            return dict(ChainMap(*histories))
