@@ -1,20 +1,20 @@
 import asyncio
 import requests
 import json
+import sqlite3
 
 import pandas as pd
 
 from DataCollection.GraphQL import GraphQL
-from databases import Database
 from collections import ChainMap
 from hashlib import sha256
 
 class DateBreakdown():
-    def __init__(self, config_path, database):
+    def __init__(self, config_path, database_path):
         self.config = json.load(open(config_path))
-        self.database = database
 
         self.config_path = config_path
+        self.database_path = database_path
 
         self.query = GraphQL(self.config["tokens"])
 
@@ -79,19 +79,35 @@ class DateBreakdown():
         current_id = f"h{sha256(date_format(period).encode()).hexdigest()}"
         start, end = date_format(period.start_time), date_format(period.end_time)
 
-        # Collect data on new and partially existing periods
-        next_page = await self.database.fetch_one("SELECT DISTINCT NextPage FROM History WHERE ID=:ID", {"ID": current_id})
-        after = await self.database.fetch_one("SELECT DISTINCT After FROM History WHERE ID=:ID", {"ID": current_id})
+        # Find previous history about period
+        database = sqlite3.connect(self.database_path)
+        next_page = database.cursor().execute("SELECT DISTINCT NextPage FROM History WHERE ID=?", (current_id,)).fetchone()
+        after = database.cursor().execute("SELECT DISTINCT After FROM History WHERE ID=?", (current_id,)).fetchone()
+        database.close()
 
-        if next_page == True or next_page == None:
+        # Ensures data is collected for new entries
+        next_page = True if next_page == None else next_page[0]
+        after = None if after == None else after[0]
+
+        if next_page == True:
             variables = select_variables({"next_page": next_page, "after": after}, self.config)
             variables["conditions"] = f"is:public sort:created created:{start}..{end}"
 
             async for output, new_history in self.query.get_stream(query, variables):
-                replace_query = "REPLACE INTO History(ID, NextPage, After) VALUES (:ID, :NextPage, :After)"
-                values = {"ID": current_id, "NextPage": new_history["next_page"], "After": new_history["after"]}
-                await self.database.execute(replace_query, values)
-                await asyncio.get_running_loop().run_in_executor(None, lambda : parser.append(output))
+                def save():
+                    # Update history database
+                    database = sqlite3.connect(self.database_path)
+                    replace_query = "REPLACE INTO History(ID, NextPage, After) VALUES (:ID, :NextPage, :After)"
+                    values = {"ID": current_id, "NextPage": new_history["next_page"], "After": new_history["after"]}
+                    database.execute(replace_query, values)
+                    database.commit()
+                    database.close()
+
+                    # Process and save new data
+                    parser.append(output)
+
+                # Run lengthy parsing and saving on a seperate thread
+                await asyncio.get_running_loop().run_in_executor(None, save)
 
     # Collects data between a list of periods
     async def collect_between(self, periods, query: str, select_variables, parser):
