@@ -4,5 +4,6 @@
     "TOKEN 2",
     "TOKEN 3"
   ],
-  "first": 100
+  "first": 100,
+  "proxy": "PROXY"
 }

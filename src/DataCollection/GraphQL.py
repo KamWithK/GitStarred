@@ -13,8 +13,9 @@ from collections import ChainMap
 from hashlib import sha256
 
 class GraphQL():
-    def __init__(self, tokens: list):
+    def __init__(self, tokens: list, proxy: str):
         self.tokens = cycle(tokens)
+        self.proxy = proxy
         self.next_header = lambda : {"Authorization": f"token {next(self.tokens)}"}
         self.session = None
 
@@ -27,7 +28,7 @@ class GraphQL():
         # Added in limits (haven't tested yet)
         if self.session == None: self.session = ClientSession(connector=aiohttp.TCPConnector(limit=300, limit_per_host=300), timeout=aiohttp.ClientTimeout(connect=120))
 
-        async with self.session.post("https://api.github.com/graphql", headers=self.next_header(), json=json_query) as response:
+        async with self.session.post("https://api.github.com/graphql", headers=self.next_header(), json=json_query, proxy=self.proxy) as response:
             parsed_data = await response.json()
 
         json.dump(parsed_data, open("Data/TempData.json", "w"), indent=2)

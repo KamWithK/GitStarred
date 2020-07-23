@@ -16,7 +16,7 @@ class DateBreakdown():
         self.config_path = config_path
         self.database_path = database_path
 
-        self.query = GraphQL(self.config["tokens"])
+        self.query = GraphQL(self.config["tokens"], self.config["proxy"])
 
         # Subquery to use when batching
         self.search = open("src/Queries/InnerDateTester.graphql").read()
