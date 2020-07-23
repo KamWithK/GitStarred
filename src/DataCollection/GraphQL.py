@@ -24,7 +24,8 @@ class GraphQL():
     async def basic_query(self, query: str, variables=None):
         json_query = {"query": query, "variables": variables}
 
-        if self.session == None: self.session = ClientSession()
+        # Added in limits (haven't tested yet)
+        if self.session == None: self.session = ClientSession(connector=aiohttp.TCPConnector(limit=300, limit_per_host=300), timeout=aiohttp.ClientTimeout(connect=120))
 
         async with self.session.post("https://api.github.com/graphql", headers=self.next_header(), json=json_query) as response:
             parsed_data = await response.json()
