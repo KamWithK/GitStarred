@@ -5,8 +5,6 @@ class Parser():
     data = pd.DataFrame(columns=["Name", "ID", "Description", "ForkCount", "Fork", "Archived", "Locked", "CreatedDate", "LastPushedDate", "PrimaryLanguage", "Users", "Stars", "Watchs", "Issues", "PullRequests", "Topics", "License", "Commits", "README"])
 
     def __init__(self, data=None):
-        self.data = self.fix_dtypes(self.data)
-
         if type(data) == pd.DataFrame:
             self.data = self.data.append(data, ignore_index=True)
         elif data != None:
