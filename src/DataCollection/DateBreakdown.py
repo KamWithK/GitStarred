@@ -6,6 +6,7 @@ import sqlite3
 import pandas as pd
 
 from DataCollection.GraphQL import GraphQL
+from fork_futures import ForkPoolExecutor
 from collections import ChainMap
 from hashlib import sha256
 
@@ -74,43 +75,63 @@ class DateBreakdown():
 
         return await self.expand_periods(safe_periods)
 
-    async def collect_period(self, period, query: str, select_variables, parser):
-        date_format = lambda date : date.strftime("%Y-%m-%dT%H:%M:%d")
-        current_id = f"h{sha256(date_format(period).encode()).hexdigest()}"
-        start, end = date_format(period.start_time), date_format(period.end_time)
+    # Evaluates whether to continue with a period
+    def period_producer(self, period, period_id, condition, after=None, next_page=None):
+        # Find previous history from database where not fed into function
+        if after == None and next_page == None:
+            database = sqlite3.connect(self.database_path)
+            next_page = database.cursor().execute("SELECT DISTINCT NextPage FROM History WHERE ID=?", (period_id,)).fetchone()
+            after = database.cursor().execute("SELECT DISTINCT After FROM History WHERE ID=?", (period_id,)).fetchone()
+            database.close()
 
-        # Find previous history about period
-        database = sqlite3.connect(self.database_path)
-        next_page = database.cursor().execute("SELECT DISTINCT NextPage FROM History WHERE ID=?", (current_id,)).fetchone()
-        after = database.cursor().execute("SELECT DISTINCT After FROM History WHERE ID=?", (current_id,)).fetchone()
-        database.close()
-
-        # Ensures data is collected for new entries
-        next_page = True if next_page == None else next_page[0]
-        after = None if after == None else after[0]
+            # Ensures data is collected for new entries
+            next_page = True if next_page == None else next_page[0]
+            after = None if after == None else after[0]
 
         if next_page == True:
-            variables = select_variables({"next_page": next_page, "after": after}, self.config)
-            variables["conditions"] = f"is:public sort:created created:{start}..{end}"
+            return (period, period_id, next_page, after, condition)
 
-            async for output, new_history in self.query.get_stream(query, variables):
-                def save():
-                    # Update history database
-                    database = sqlite3.connect(self.database_path)
-                    replace_query = "REPLACE INTO History(ID, NextPage, After) VALUES (:ID, :NextPage, :After)"
-                    values = {"ID": current_id, "NextPage": new_history["next_page"], "After": new_history["after"]}
-                    database.execute(replace_query, values)
-                    database.commit()
-                    database.close()
+    # Saves and processes data
+    def process_data(self, period_id, output, after, next_page, parser):
+        # Update history database
+        database = sqlite3.connect(self.database_path)
+        replace_query = "REPLACE INTO History(ID, NextPage, After) VALUES (:ID, :NextPage, :After)"
+        database.execute(replace_query, {"ID": period_id, "NextPage": next_page, "After": after})
+        database.commit()
+        database.close()
 
-                    # Process and save new data
-                    parser.append(output)
+        # Process and save new data
+        parser.append(output)
 
-                # Run lengthy parsing and saving on a seperate thread
-                await asyncio.get_running_loop().run_in_executor(None, save)
+    # Collect and process a single page of data for one period
+    async def processor(self, period, period_id, next_page, after, condition, query: str, select_variables, parser, semaphore, pool):
+        variables = select_variables({"next_page": next_page, "after": after}, self.config)
+        variables["conditions"] = condition
+        output, metadata = await self.query.try_meta_query(query, variables, semaphore)
+        after, next_page = metadata.get("after"), metadata.get("next_page", True)
 
-    # Collects data between a list of periods
+        # Run lengthy parsing and saving on a seperate process
+        pool.submit(self.process_data, period_id, output, after, next_page, parser)
+
+        return self.period_producer(period, period_id, condition, after, next_page)
+
+    # Collects data for a list of periods
     async def collect_between(self, periods, query: str, select_variables, parser):
-        await asyncio.gather(*[self.collect_period(period, query, select_variables, parser) for period in periods])
+        date_format = lambda date : date.strftime("%Y-%m-%dT%H:%M:%d")
+        period_id = lambda period : f"h{sha256(date_format(period).encode()).hexdigest()}"
+        condition = lambda period : f"is:public sort:created created:{date_format(period.start_time)}..{date_format(period.end_time)}"
+        period_producer = lambda period : self.period_producer(period, period_id(period), condition(period))
+
+        # Ensure steady download rate
+        semaphore = asyncio.Semaphore(10000)
+        pool = ForkPoolExecutor()
+
+        query_periods = await asyncio.gather(*[asyncio.get_event_loop().run_in_executor(None, period_producer, period) for period in periods])
+        print("Finished preprocessing periods")
+
+        # Continue to re-query each period until everything is collected
+        while len(query_periods) > 0:
+            query_periods = await asyncio.gather(*[self.processor(*query_period, query, select_variables, parser, semaphore, pool) for query_period in query_periods if query_period != None])
         
+        pool.shutdown()
         if self.query.session != None: await self.query.session.close()

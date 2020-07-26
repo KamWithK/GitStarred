@@ -22,14 +22,19 @@ class GraphQL():
     # Makes a single query
     # View "Data/Temp.json" for raw data
     @retry(wait=wait_full_jitter())
-    async def basic_query(self, query: str, variables=None):
+    async def basic_query(self, query: str, variables=None, semaphore=None):
         json_query = {"query": query, "variables": variables}
 
         # Added in limits (haven't tested yet)
-        if self.session == None: self.session = ClientSession(connector=aiohttp.TCPConnector(limit=300, limit_per_host=300), timeout=aiohttp.ClientTimeout(connect=120))
+        if self.session == None: self.session = ClientSession(timeout=aiohttp.ClientTimeout(connect=120))
 
-        async with self.session.post("https://api.github.com/graphql", headers=self.next_header(), json=json_query, proxy=self.proxy) as response:
-            parsed_data = await response.json()
+        if semaphore != None:
+            async with semaphore:
+                async with self.session.post("https://api.github.com/graphql", headers=self.next_header(), json=json_query, proxy=self.proxy) as response:
+                    parsed_data = await response.json()
+        else:
+            async with self.session.post("https://api.github.com/graphql", headers=self.next_header(), json=json_query, proxy=self.proxy) as response:
+                parsed_data = await response.json()
 
         json.dump(parsed_data, open("Data/TempData.json", "w"), indent=2)
 
@@ -43,8 +48,8 @@ class GraphQL():
 
     # Makes a single query keeping state
     # Needs to have the `after` and `next_page` parameters in the expected location (within `search`, `pageInfo`)
-    async def try_meta_query(self, query: str, variables={}):
-        data = await self.basic_query(query, variables)
+    async def try_meta_query(self, query: str, variables={}, semaphore=None):
+        data = await self.basic_query(query, variables, semaphore)
         data = data["search"]
 
         return data["edges"], {"after": data["pageInfo"]["endCursor"], "next_page": data["pageInfo"]["hasNextPage"]}
