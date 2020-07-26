@@ -7,6 +7,7 @@ import pandas as pd
 
 from DataCollection.GraphQL import GraphQL
 from fork_futures import ForkPoolExecutor
+from multiprocessing import Queue
 from collections import ChainMap
 from hashlib import sha256
 
@@ -103,15 +104,23 @@ class DateBreakdown():
         # Process and save new data
         parser.append(output)
 
+    def continuous_parse(self, queue: Queue, parser):
+        item = queue.get()
+
+        while item != "FINISHED":
+            self.process_data(*item, parser)
+            item = queue.get()
+        queue.close()
+
     # Collect and process a single page of data for one period
-    async def processor(self, period, period_id, next_page, after, condition, query: str, select_variables, parser, semaphore, pool):
+    async def processor(self, period, period_id, next_page, after, condition, query: str, select_variables, semaphore, queue):
         variables = select_variables({"next_page": next_page, "after": after}, self.config)
         variables["conditions"] = condition
         output, metadata = await self.query.try_meta_query(query, variables, semaphore)
         after, next_page = metadata.get("after"), metadata.get("next_page", True)
 
-        # Run lengthy parsing and saving on a seperate process
-        pool.submit(self.process_data, period_id, output, after, next_page, parser)
+        # Add to queue for processing on a dedicated process
+        queue.put((period_id, output, after, next_page))
 
         return self.period_producer(period, period_id, condition, after, next_page)
 
@@ -123,15 +132,25 @@ class DateBreakdown():
         period_producer = lambda period : self.period_producer(period, period_id(period), condition(period))
 
         # Ensure steady download rate
+        # Using a semaphore to limit concurrent attempts to connect and queue for parallel processing
         semaphore = asyncio.Semaphore(10000)
-        pool = ForkPoolExecutor()
+        queue = Queue()
 
         query_periods = await asyncio.gather(*[asyncio.get_event_loop().run_in_executor(None, period_producer, period) for period in periods])
         print("Finished preprocessing periods")
 
-        # Continue to re-query each period until everything is collected
+        # Create dedicated process for data logging and processing
+        pool = ForkPoolExecutor()
+        pool.submit(self.continuous_parse, queue, parser)
+        print("Started data processing process")
+
+        # Continue to re-query each period until all data is collected
+        print("Started loading data...")
         while len(query_periods) > 0:
-            query_periods = await asyncio.gather(*[self.processor(*query_period, query, select_variables, parser, semaphore, pool) for query_period in query_periods if query_period != None])
-        
-        pool.shutdown()
+            query_periods = await asyncio.gather(*[self.processor(*query_period, query, select_variables, semaphore, queue) for query_period in query_periods if query_period != None])
+
+        # Close everything and release all resources after everything is complete
         if self.query.session != None: await self.query.session.close()
+        queue.put("FINISHED")
+        pool.shutdown()
+        print("\nFINISHED")
