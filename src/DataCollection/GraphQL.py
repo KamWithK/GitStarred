@@ -5,7 +5,6 @@ import re
 import pandas as pd
 
 from aiohttp import ClientSession
-from aiohttp_socks import ProxyConnector
 from tenacity import retry
 from tenacity import wait_full_jitter
 from itertools import cycle
