@@ -1,22 +1,14 @@
-import asyncio
-import requests
-import json
-import sqlite3
-
-import pandas as pd
+import asyncio, asyncpg
 
 from DataCollection.GraphQL import GraphQL
-from fork_futures import ForkPoolExecutor
-from multiprocessing import Queue
+from datetime import datetime
 from collections import ChainMap
 from hashlib import sha256
 
 class DateBreakdown():
-    def __init__(self, config_path, database_path):
-        self.config = json.load(open(config_path))
-
-        self.config_path = config_path
-        self.database_path = database_path
+    def __init__(self, config: dict, pool: asyncpg.pool.Pool):
+        self.config = config
+        self.pool = pool
 
         self.query = GraphQL(self.config["tokens"], self.config["proxy"])
 
@@ -24,133 +16,94 @@ class DateBreakdown():
         self.search = open("src/Queries/InnerDateTester.graphql").read()
 
     # Checks whether each period is small enough for full data collection
-    async def valid_periods(self, periods):
+    async def valid_periods(self, periods: list):
         # Format strings in specific ways for GraphQL
         # IDs must start with an alphabetic character, so h is put at the start
         date_format = lambda date : date.strftime("%Y-%m-%dT%H:%M:%d")
-        argument = lambda period : f"created:{date_format(period.start_time)}..{date_format(period.end_time)}"
-        id_hash = lambda period : f"h{sha256(date_format(period).encode()).hexdigest()}"
+        argument = lambda start, end: f"created:{date_format(start)}..{date_format(end)}"
+        id_hash = lambda time_string : f"h{sha256(time_string.encode()).hexdigest()}"
+        period_id = lambda start, end : id_hash(date_format(start) + "  " + date_format(end))
 
         # Execute all checks in one batch query
-        searches = [self.search.format(id=id_hash(period), argument=argument(period)) for period in periods]
-        less_than_1000 = lambda section : section["repositoryCount"] < 1000
+        # Return as a list of tuples (with their period, number of repos and whether valid)
+        searches = [self.search.format(id=period_id(*period), argument=argument(*period)) for period in periods]
+        get_info = lambda entry : (entry[0], entry[1]["repositoryCount"], entry[1]["repositoryCount"] < 1000)
 
-        return map(less_than_1000, (await self.query.batch_query("{}", searches)).values())
+        return map(get_info, zip(periods, (await self.query.batch_query("{}", searches)).values()))
 
     # Divide one large period into two half as small
-    def half_period(self, original_period):
-        freq = original_period.freq / 2
-        first_period = original_period.asfreq(freq, how="start")
-        second_period = pd.Period(first_period.end_time, freq)
+    def half_period(self, start, end):
+        return (start, start + (end - start) / 2), (start + (end - start) / 2, end)
 
-        return first_period, second_period
+    # Breath first search for valid date periods (under 1000 results each)
+    # By continuously halving the search space
+    async def expand_periods(self, periods: list):
+        while True:
+            trial_periods = []
 
-    # Breath first search for valid date periods
-    # Something passing in an empty list (not `safe_expand_periods`)
-    async def expand_periods(self, periods):
-        periods_converged = []
-        trial_periods = []
+            # Handle one period at a time
+            for period, num_repos, is_valid in await self.valid_periods(periods):
+                if is_valid == True and num_repos > 0:
+                    async with self.pool.acquire() as connection:
+                        await connection.execute("INSERT INTO Periods(StartDate, EndDate, NumRepos) VALUES ($1, $2, $3)", *period, num_repos)
+                else:
+                    trial_periods.extend(self.half_period(*period))
 
-        # Sort periods into two lists
-        for period, is_valid in zip(periods, await self.valid_periods(periods)):
-            if is_valid == True:
-                periods_converged.append(period)
-            else:
-                trial_periods.extend(self.half_period(period))
+            if trial_periods == []: break
+            else: periods = trial_periods
 
-        if trial_periods != []:
-            new_periods = await self.expand_periods(trial_periods)
-            return [*periods_converged, *new_periods]
-        else:
-            pd.DataFrame(periods_converged).to_pickle("Data/Periods.pickle")
-            return pd.DataFrame(periods_converged)
+        # Prepopulate history
+        async with self.pool.acquire() as connection:
+            await connection.execute("INSERT INTO History(StartDate, EndDate) SELECT StartDate, EndDate FROM Periods")
 
     # Ensures no future dates (after today) are passed into `expand_periods`
-    async def safe_expand_periods(self, periods):
-        safe_periods = [period for period in periods if period.start_time < pd.to_datetime("now")]
+    async def safe_expand_periods(self, periods: list):
+        safe_periods = periods
 
-        for period in safe_periods:
-            if period.end_time > pd.to_datetime("now"):
+        for period in periods:
+            if period[0] > datetime.now():
                 safe_periods.remove(period)
-                safe_periods.append(pd.Period(period.start_time, pd.to_datetime("now") - period.start_time))
+            elif period[1] > datetime.now():
+                safe_periods.remove(period)
+                safe_periods.append((period[0], datetime.now()))
 
-        return await self.expand_periods(safe_periods)
-
-    # Evaluates whether to continue with a period
-    def period_producer(self, period, period_id, condition, after=None, next_page=None):
-        # Find previous history from database where not fed into function
-        if after == None and next_page == None:
-            database = sqlite3.connect(self.database_path)
-            next_page = database.cursor().execute("SELECT DISTINCT NextPage FROM History WHERE ID=?", (period_id,)).fetchone()
-            after = database.cursor().execute("SELECT DISTINCT After FROM History WHERE ID=?", (period_id,)).fetchone()
-            database.close()
-
-            # Ensures data is collected for new entries
-            next_page = True if next_page == None else next_page[0]
-            after = None if after == None else after[0]
-
-        if next_page == True:
-            return (period, period_id, next_page, after, condition)
-
-    # Saves and processes data
-    def process_data(self, period_id, output, after, next_page, parser):
-        # Update history database
-        database = sqlite3.connect(self.database_path)
-        replace_query = "REPLACE INTO History(ID, NextPage, After) VALUES (:ID, :NextPage, :After)"
-        database.execute(replace_query, {"ID": period_id, "NextPage": next_page, "After": after})
-        database.commit()
-        database.close()
-
-        # Process and save new data
-        parser.append(output)
-
-    def continuous_parse(self, queue: Queue, parser):
-        item = queue.get()
-
-        while item != "FINISHED":
-            self.process_data(*item, parser)
-            item = queue.get()
-        queue.close()
+        await self.expand_periods(safe_periods)
 
     # Collect and process a single page of data for one period
-    async def processor(self, period, period_id, next_page, after, condition, query: str, select_variables, semaphore, queue):
+    async def processor(self, start, end, next_page, after, condition, query: str, select_variables, semaphore, parser):
         variables = select_variables({"next_page": next_page, "after": after}, self.config)
         variables["conditions"] = condition
         output, metadata = await self.query.try_meta_query(query, variables, semaphore)
-        after, next_page = metadata.get("after"), metadata.get("next_page", True)
+        next_page, after = metadata.get("next_page", True), metadata.get("after")
 
-        # Add to queue for processing on a dedicated process
-        queue.put((period_id, output, after, next_page))
+        # Log progress and process/save data to database before continuing
+        # Either progress and data is saved or neither (through a single transaction)
+        async with self.pool.acquire() as connection:
+            async with connection.transaction():
+                replace_query = "UPDATE History SET NextPage=$3, After=$4 WHERE StartDate=$1 AND EndDate=$2"
+                await parser.commit_data(output, connection)
+                await connection.execute(replace_query, start, end, next_page, after)
 
-        return self.period_producer(period, period_id, condition, after, next_page)
+        if next_page == True: return (start, end, next_page, after, condition)
 
     # Collects data for a list of periods
-    async def collect_between(self, periods, query: str, select_variables, parser):
+    async def collect_between(self, query: str, select_variables, parser):
         date_format = lambda date : date.strftime("%Y-%m-%dT%H:%M:%d")
-        period_id = lambda period : f"h{sha256(date_format(period).encode()).hexdigest()}"
-        condition = lambda period : f"is:public sort:created created:{date_format(period.start_time)}..{date_format(period.end_time)}"
-        period_producer = lambda period : self.period_producer(period, period_id(period), condition(period))
+        condition = lambda period_data : f"is:public sort:created created:{date_format(period_data[0])}..{date_format(period_data[1])}"
 
         # Ensure steady download rate
-        # Using a semaphore to limit concurrent attempts to connect and queue for parallel processing
-        semaphore = asyncio.Semaphore(10000)
-        queue = Queue()
+        # Using a semaphore to limit concurrent query attempts
+        semaphore = asyncio.Semaphore(15000)
 
-        query_periods = await asyncio.gather(*[asyncio.get_event_loop().run_in_executor(None, period_producer, period) for period in periods])
-        print("Finished preprocessing periods")
-
-        # Create dedicated process for data logging and processing
-        pool = ForkPoolExecutor()
-        pool.submit(self.continuous_parse, queue, parser)
-        print("Started data processing process")
+        # Import periods which haven't yet been collected
+        async with self.pool.acquire() as connection:
+            history = [(*period_data, condition(period_data)) for period_data in await connection.fetch("SELECT * FROM History WHERE NextPage=True")]
 
         # Continue to re-query each period until all data is collected
         print("Started loading data...")
-        while len(query_periods) > 0:
-            query_periods = await asyncio.gather(*[self.processor(*query_period, query, select_variables, semaphore, queue) for query_period in query_periods if query_period != None])
+        while len(history) > 0:
+            history = await asyncio.gather(*[self.processor(*period_data, query, select_variables, semaphore, parser) for period_data in history])
 
-        # Close everything and release all resources after everything is complete
+        # Close everything and release all resources after completion
         if self.query.session != None: await self.query.session.close()
-        queue.put("FINISHED")
-        pool.shutdown()
         print("\nFINISHED")

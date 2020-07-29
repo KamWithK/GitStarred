@@ -1,4 +1,5 @@
 {
+  "database": "postgresql://user:password@localhost/GitHubData",
   "tokens": [
     "TOKEN 1",
     "TOKEN 2",

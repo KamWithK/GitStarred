@@ -2,11 +2,8 @@ import asyncio, aiohttp
 import json
 import re
 
-import pandas as pd
-
 from aiohttp import ClientSession
-from tenacity import retry
-from tenacity import wait_full_jitter
+from tenacity import retry, wait_full_jitter
 from itertools import cycle
 from collections import ChainMap
 from hashlib import sha256
@@ -25,7 +22,7 @@ class GraphQL():
         json_query = {"query": query, "variables": variables}
 
         # Added in limits (haven't tested yet)
-        if self.session == None: self.session = ClientSession(timeout=aiohttp.ClientTimeout(connect=120))
+        if self.session == None: self.session = ClientSession(timeout=aiohttp.ClientTimeout(total=120))
 
         if semaphore != None:
             async with semaphore:
