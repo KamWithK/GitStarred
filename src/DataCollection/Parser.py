@@ -94,7 +94,7 @@ class Parser():
         return (data["ID"], data["Name"], data["Description"], data["Topics"], data["License"], data["README"], data["PrimaryLanguage"], data["CreatedDate"], data["LastPushedDate"], data["Fork"], data["Archived"], data["Locked"], data["ForkCount"], data["Commits"], data["Issues"], data["PullRequests"], data["Users"], data["Watchs"], data["Stars"])
 
     async def commit_data(self, data: dict, connection: asyncpg.Connection):
-        query = "INSERT INTO Repositories(ID, Name, Description, Topics, License, README, PrimaryLanguage, CreatedDate, LatePushedDate, Fork, Archived, Locked, ForkCount, Commits, Issues, PullRequests, Users, Watchs, Stars) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) ON CONFLICT (ID) DO UPDATE SET ID=$1, Name=$2, Description=$3, Topics=$4, License=$5, README=$6, PrimaryLanguage=$7, CreatedDate=$8, LatePushedDate=$9, Fork=$10, Archived=$11, Locked=$12, ForkCount=$13, Commits=$14, Issues=$15, PullRequests=$16, Users=$17, Watchs=$18, Stars=$19"
+        query = "INSERT INTO Repositories(ID, Name, Description, Topics, License, README, PrimaryLanguage, CreatedDate, LastPushedDate, Fork, Archived, Locked, ForkCount, Commits, Issues, PullRequests, Users, Watchs, Stars) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19) ON CONFLICT (ID) DO UPDATE SET ID=$1, Name=$2, Description=$3, Topics=$4, License=$5, README=$6, PrimaryLanguage=$7, CreatedDate=$8, LastPushedDate=$9, Fork=$10, Archived=$11, Locked=$12, ForkCount=$13, Commits=$14, Issues=$15, PullRequests=$16, Users=$17, Watchs=$18, Stars=$19"
         parsed_entries = []
 
         for repo in data:
@@ -103,4 +103,4 @@ class Parser():
 
         await connection.executemany(query, parsed_entries)
 
-        print(f"\rSearched {await connection.fetchval('SELECT COUNT(*) FROM Repositories')} repositories", end="", flush=True)
+        # print(f"\rSearched {await connection.fetchval('SELECT COUNT(*) FROM Repositories')} repositories", end="", flush=True)
