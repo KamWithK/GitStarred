@@ -1,0 +1,18 @@
+name: base
+channels:
+  - defaults
+  - conda-forge
+  - johnsnowlabs
+dependencies:
+  - aiohttp
+  - asyncpg
+  - tenacity
+  - openjdk=8.0.152
+  - spark-nlp
+  - xgboost
+  - pip
+  - pip:
+    - pyspark
+    - h2o
+    - h2o-pysparkling-3
+prefix: /home/kamron/anaconda3
