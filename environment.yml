@@ -8,11 +8,12 @@ dependencies:
   - asyncpg
   - tenacity
   - openjdk=8.0.152
+  - py4j=0.10.9
   - spark-nlp
   - xgboost
   - pip
   - pip:
     - pyspark
     - h2o
-    - h2o-pysparkling-3
+    - h2o-pysparkling-3.0
 prefix: /home/kamron/anaconda3
