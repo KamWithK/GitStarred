@@ -7,8 +7,8 @@ In this project, we aim to decipher what differentiates beloved repositories fro
 The project is split up into multiple parts:
 * Data collection using the GitHub GraphQL API
 * Data pipeline for feature engineering (finding, selecting and creating features)
-* Modelling using H2O's AutoML model trainer (iteratively on small subsets of the raw ~50 GB dataset)
-* Training the final/full model (and evaluating it)
+* Ensemble modelling using H2O's AutoML model trainer (iteratively on small subsets of the raw ~50 GB dataset)
+* Neural network modelling using PyTorch and Huggingn Face Transformers
 * Creating a website to predict a repositories performance and provide suggestions
 
 *Note that this project is currently a work in progress, so not everything here has been implemented yet.*
@@ -46,10 +46,6 @@ First off we analyse our popularity metrics (stars, forks and watches).
 Although we could use any metric, stars seem the most direct and so intuitive (so the rest can be ignored).
 To easily interpret the results, min-max feature scaling is used.
 This means the least popular repositories will have a value of zero and the most *amazing performers* 1!
-This SQL query `SELECT Stars/$1 FROM Repositories` where `$1` is the maximum number of repositories (found with `SELECT max(Stars) FROM Repositories`) is an efficient way to extract it.
-
-
-*Note that model performances along with feature importance graphs will indicate where to go next...*
 
 
 Once we're confident we've gotten the most out of all numerical and categorical features, we'll use a mixture of manual feature extraction and natural language processing (NLP) techniques on our text.
@@ -74,17 +70,19 @@ Then later on for NLP (for readme's only with titles, to reduce the amount of pr
 A random selection of ensemble models (including random forests and gradient boosted trees) can be trained on our processed data.
 These work well with structured data (numbers, categories...), allowing us to start modelling quickly.
 
-We can quickly train small models, and once we're satisfied to move onto retraining on the full dataset (for better results and generalisability)!
+We can quickly train small ensemble models, and once we're satisfied to move onto retraining on the full dataset (for better results and generalisability)!
 *Despite the previous processing work, training a model likely still requires a powerful computer.*
 *Google Cloud Platform or Amazon Web Services can provide these!*
+
+Afterwards we can try training neural networks.
 
 ## Architecture
 Since this isn't a *small project* (there's ~50 GB of data), speed and reliability are large issues.
 To overcome this, we use the following open source technologies, frameworks and libraries:
 * Asynchronous data collection using AsyncIO, AIOHTTP (for making requests to the GitHub API) and AsyncPG (for using a relational PostgreSQL database for reliable storage)
-* Data pipeline with Apache Spark (instead of Pandas/Numpy because of its scalability) which interfaces with the previous PostgreSQL database
-* NLP processing with SparkNLP (so it fits into the rest of the pipeline)
-* Modelling with H2O AI (one library for a variety of ensemble models, including XGBoost itself) which work with Apache Spark through their Sparkling Water libraries
+* Data pipeline with Apache Spark (instead of Pandas/Numpy because of its scalability) which interfaces with the previous PostgreSQL database and Petastorm (to save Parquet files)
+* Ensemble modelling with H2O AI (one library for a variety of models, including XGBoost itself) which works with Apache Spark through their Sparkling Water libraries
+* NLP modelling with PyTorch and Hugging Face Transformers
 
 ## Install Instructions
 1. Install all system dependencies (Git, PostgreSQL, Anaconda)
@@ -98,3 +96,4 @@ To overcome this, we use the following open source technologies, frameworks and 
 9. Train the final model (using a finalised preprocessing pipeline)
 
 *Currently spark plays nicely with Java 8, but not 11. So the `environment.yml` specifically installs version `8.0.152`.*
+*It is also recommended to use Miniconda instead of the full distribution to avoid any unnecessary conflicts!*
