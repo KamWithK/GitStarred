@@ -1,0 +1,11 @@
+.vscode/launch.json
+.vscode/settings.json
+*cpython*
+Data/TempData.json
+Data/Data.dump
+Data/Data.csv
+src/Test.py
+src/h2ologs
+*checkpoint.*
+h2ologs/*
+**.parquet
