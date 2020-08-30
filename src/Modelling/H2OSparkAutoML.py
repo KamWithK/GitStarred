@@ -13,8 +13,9 @@ def deafen(function, *args):
     return output
 
 class H2OSparkAutoML():
-    def __init__(self, train_data, test_data):
+    def __init__(self, train_data, test_data, seed=1):
         self.train_data, self.test_data = train_data, test_data
+        self.seed = seed
 
     # Start H2O, train models and show results
     # Note that data processing must be run beforehand
@@ -27,15 +28,21 @@ class H2OSparkAutoML():
 
         return model, results
 
-    def visualise_model(self, results):
-        results.show()
-        self.automl.getLeaderboard("ALL").show(truncate=False)
+    # Get full leaderboard
+    def get_leaderboard(self, show=True, top_models=20, truncate=False, vertical=False):
+        if show == True:
+            self.automl.getLeaderboard("ALL").show(top_models, truncate, vertical)
 
-        # Display a variable importance plot for the best supporting model
-        def var_imp(model_id):
-            varimp = deafen(h2o.get_model(model_id).varimp)
-            if varimp != None: print(varimp)
-            else: return False
+        return self.automl.getLeaderboard("ALL")
 
+    # Get variable importance for a model
+    # When available
+    def variable_importance(self, model_id):
+        varimp = deafen(h2o.get_model(model_id).varimp)
+        if varimp != None: h2o.get_model(model_id).varimp_plot()
+        return varimp
+
+    # Display a variable importance plot for the best supporting model
+    def visualise_best_model(self):
         for model in self.automl.getLeaderboard("ALL").collect():
-            if var_imp(model["model_id"]) != False: break
+            if self.variable_importance(model["model_id"]) != None: break
