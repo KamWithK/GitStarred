@@ -15,11 +15,12 @@ dependencies:
   - pytorch>=1.6
   - pytorch-lightning
   - transformers
+  - wandb
+  - graphql-core=2.0
   - pip
   - pip:
     - pyspark
     - h2o
     - h2o-pysparkling-3.0
     - petastorm
-    - wandb
 prefix: /home/kamron/anaconda3
