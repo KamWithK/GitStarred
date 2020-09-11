@@ -1,0 +1,23 @@
+# This docker-compose file includes postgresql and miniconda (set up with the `environment.yml` file)
+version: '3.4'
+
+services:
+  database:
+    image: postgres
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=GitHubData
+    volumes:
+      - database-data=/var/lib/postgresql/data
+  python:
+    build: .
+    volumes:
+      - code=.
+    depends_on:
+      - database
+
+volumes:
+  database-data:
+  code:
